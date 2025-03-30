@@ -74,25 +74,67 @@ void read_data(FILE *file, jmp_buf *env, struct vf_entry *entry) {
 }
 
 void free_vf(struct vir_file *vf) {
-	for (uint8_t i = 0; i < vf->strings->cnt; i++) {
-		if (vf->files[i]) {
-			fclose(vf->files[i]);
+	if (vf) {
+		if (vf->vpath) {
+			free(vf->vpath);
+		}
+		for (uint8_t i = 0; i < vf->strings->cnt; i++) {
+			if (vf->files[i]) {
+				fclose(vf->files[i]);
+			}
+			if (vf->strings->paths[i]) {
+				free(vf->strings->paths[i]);
+			}
 		}
 	}
 }
 
-struct vir_file *load_vf(FILE *file) {
+char *fluxfs_get_vpath(const char *filePath) {
+	FILE *file = fopen(filePath, "rb");
+	if (!file) {
+		perror("Error opening file");
+		return NULL;
+	}
+
+	char *vpath = NULL;
+	jmp_buf env;
+
+	if (setjmp(env) == 1) {
+		fclose(file);
+		return vpath;
+	}
+
+	uint16_t pathLen = read_uint16(file, &env);
+	vpath = malloc(pathLen);
+	if (!vpath) {
+		perror("malloc failed");
+		fclose(file);
+		return NULL;
+	}
+	read_path(file, &env, vpath);
+
+	return vpath;
+}
+
+struct vir_file *load_vf(const char *filePath) {
+	FILE *file = fopen(filePath, "rb");
+	if (!file) {
+		perror("Error opening file");
+		return NULL;
+	}
+
 	struct vir_file *vf = NULL;
 	jmp_buf env;
 
 	if (setjmp(env) == 1) {
+		fclose(file);
 		return vf;
 	}
 
 	vf = malloc(sizeof(struct vir_file));
 	if (!vf) {
 		perror("malloc failed");
-		return NULL;
+		goto error;
 	}
 	memset(vf, 0, sizeof(struct vir_file));
 
@@ -103,9 +145,17 @@ struct vir_file *load_vf(FILE *file) {
 	}
 	vf->strings = strings;
 
+	uint16_t pathLen = read_uint16(file, &env);
+	vf->vpath = malloc(pathLen);
+	if (!vf->vpath) {
+		perror("malloc failed");
+		goto error;
+	}
+	read_path(file, &env, vf->vpath);
+
 	strings->cnt = read_uint8(file, &env);
 	for (int i = 0; i < strings->cnt; i++) {
-		uint16_t pathLen = read_uint16(file, &env);
+		pathLen = read_uint16(file, &env);
 		strings->paths[i] = malloc(pathLen);
 		if (!strings->paths[i]) {
 			perror("malloc failed");
@@ -148,16 +198,18 @@ struct vir_file *load_vf(FILE *file) {
 		}
 		vf->tail = entry;
 	}
+	fclose(file);
 
 	return vf;
 
 	error:
 	free_vf(vf);
+	fclose(file);
 
 	return NULL;
 }
 
-struct vir_file *create_vf() {
+struct vir_file *create_vf(char *vpath) {
 	struct vir_file *vf = NULL;
 
 	vf = malloc(sizeof(struct vir_file));
@@ -165,9 +217,15 @@ struct vir_file *create_vf() {
 		return NULL;
 	}
 	memset(vf, 0, sizeof(struct vir_file));
+	vf->vpath = strdup(vpath);
+	if (!vf->vpath) {
+		free(vf);
+		return NULL;
+	}
 
 	struct vf_strings *strings = malloc(sizeof(struct vf_strings));
 	if (!strings) {
+		free(vf->vpath);
 		free(vf);
 		return NULL;
 	}
@@ -239,9 +297,13 @@ int save_vf(struct vir_file *vf, const char *filePath) {
 		return 1;
 	}
 
+	uint16_t pathLen = strlen(vf->vpath) + 1;
+	fwrite(&pathLen, 2, 1, file);
+	fwrite(vf->vpath, pathLen, 1, file);
+
 	fwrite(&vf->strings->cnt, 1, 1, file);
 	for (uint8_t i = 0; i < vf->strings->cnt; i++) {
-		uint16_t pathLen = strlen(vf->strings->paths[i]) + 1;
+		pathLen = strlen(vf->strings->paths[i]) + 1;
 		fwrite(&pathLen, 2, 1, file);
 		fwrite(vf->strings->paths[i], pathLen, 1, file);
 	}
@@ -398,8 +460,9 @@ int read_from_vf(struct vir_file *vf, char *buf, size_t size, uint64_t offset) {
 }
 
 void print_vf(struct vir_file *vf) {
+	printf("Virtual Path: %s\n", vf->vpath);
 	printf("Virtual Size: %" PRIu64 "\n", vf->size);
-	printf("Path Strings:");
+	printf("Path Strings:\n");
 	// Print path strings
 	for (uint8_t i = 0; i < vf->strings->cnt; i++) {
 		printf("%s\n", vf->strings->paths[i]);

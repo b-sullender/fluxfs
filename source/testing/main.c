@@ -37,8 +37,9 @@ int createSourceFile() {
 }
 
 // This is an example of creating a virtual file
-int createVirtualFile() {
-	struct vir_file *vf = create_vf();
+int createVirtualFile(const char *filePath) {
+	// The path arg is the virtual path on the file system
+	struct vir_file *vf = create_vf("files/bytes.bin");
 	if (!vf) {
 		fprintf(stderr, "Failed to create virtual file\n");
 		return EXIT_FAILURE;
@@ -64,13 +65,13 @@ int createVirtualFile() {
 	};
 	vf_add_data(vf, 10, data2);
 
-	// Save the virtual file
-	if (save_vf(vf, "virfile.vf") != EXIT_SUCCESS) {
+	// Save the file
+	if (save_vf(vf, filePath) != EXIT_SUCCESS) {
 		fprintf(stderr, "Failed to save virtual file\n");
 		return EXIT_FAILURE;
 	}
 
-	printf("Test file written to virfile.vf\n");
+	printf("Test file written to %s\n", filePath);
 
 	return EXIT_SUCCESS;
 }
@@ -122,19 +123,12 @@ int test_vf(struct vir_file *vf) {
 
 int main() {
 	createSourceFile();
-	createVirtualFile();
+	createVirtualFile("fluxfs.vf");
 	printf("-------------------------------------------------\n");
 
-	FILE *file = fopen("virfile.vf", "rb");
-	if (!file) {
-		perror("Error opening file");
-		return EXIT_FAILURE;
-	}
-
-	struct vir_file *vf = load_vf(file);
+	struct vir_file *vf = load_vf("fluxfs.vf");
 	if (!vf) {
 		fprintf(stderr, "Failed to load virtual file\n");
-		fclose(file);
 		return EXIT_FAILURE;
 	}
 
@@ -142,7 +136,6 @@ int main() {
 	test_vf(vf);
 
 	free_vf(vf);
-	fclose(file);
 
 	return EXIT_SUCCESS;
 }
