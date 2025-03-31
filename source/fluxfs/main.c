@@ -7,6 +7,69 @@
 
 #include "../lib/fluxfs.h"
 
+struct fluxfs_file {
+	char *name;
+	struct fluxfs_file *next;
+};
+
+struct fluxfs_dir {
+	char *name;
+	struct fluxfs_dir *parent;
+	struct fluxfs_dir *subdirs;
+	struct fluxfs_dir *next;
+	struct fluxfs_file *files;
+};
+
+// Find or create a directory
+struct fluxfs_dir *foc_directory(struct fluxfs_dir *parent, const char *dirname) {
+	// Search for existing directory
+	struct fluxfs_dir *current = parent->subdirs;
+	while (current) {
+		if (strcmp(current->name, dirname) == 0) {
+			return current;
+		}
+		current = current->next;
+	}
+
+	// If directory doesn't exist, create it
+	struct fluxfs_dir *newdir = malloc(sizeof(struct fluxfs_dir));
+	memset(newdir, 0, sizeof(struct fluxfs_dir));
+	newdir->name = strdup(dirname);
+	newdir->parent = parent;
+	newdir->next = parent->subdirs;
+	parent->subdirs = newdir;
+
+	return newdir;
+}
+
+struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *filename) {
+	struct fluxfs_file *newfile = malloc(sizeof(struct fluxfs_file));
+
+	newfile->name = strdup(filename);
+	newfile->next = dir->files;
+	dir->files = newfile;
+
+	return newfile;
+}
+
+int add_virtual_file(struct fluxfs_dir *root, const char *vpath) {
+	struct fluxfs_dir *current = root;
+	char *path = strdup(vpath);
+	char *token = strtok(path, "/");
+
+	while (token) {
+		char *next_token = strtok(NULL, "/");
+		if (next_token) {
+			current = foc_directory(current, token);
+		} else {
+			add_file_to_directory(current, token);
+		}
+		token = next_token;
+	}
+
+	return EXIT_SUCCESS;
+}
+
 char **get_scan_directories(const char *filename, size_t *line_count) {
 	FILE *file = fopen(filename, "r");
 	if (file == NULL) {
@@ -140,11 +203,15 @@ int main() {
 		printf("No virtual files found.\n");
 	}
 
+	struct fluxfs_dir *root = malloc(sizeof(struct fluxfs_dir));
+	memset(root, 0, sizeof(struct fluxfs_dir));
+
 	printf("Virtual Paths:\n");
 	for (size_t i = 0; i < file_count; i++) {
 		char *vpath = fluxfs_get_vpath(virtual_files[i]);
 		if (vpath) {
 			printf("%s\n", vpath);
+			add_virtual_file(root, vpath);
 		}
 	}
 
