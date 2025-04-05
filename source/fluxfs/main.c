@@ -15,6 +15,7 @@
 #include "../lib/fluxfs.h"
 
 struct fluxfs_file {
+	char *real_path;
 	char *name;
 	uint64_t size;
 	struct fluxfs_file *next;
@@ -66,9 +67,10 @@ struct fluxfs_dir *goc_directory(struct fluxfs_dir *parent, const char *dirname)
 	return newdir;
 }
 
-struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *filename, uint64_t size) {
+struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *real_path, const char *filename, uint64_t size) {
 	struct fluxfs_file *newfile = malloc(sizeof(struct fluxfs_file));
 
+	newfile->real_path = strdup(real_path);
 	newfile->name = strdup(filename);
 	newfile->size = size;
 	newfile->next = dir->files;
@@ -77,7 +79,7 @@ struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *fi
 	return newfile;
 }
 
-int add_virtual_file(const char *vpath, uint64_t size) {
+int add_virtual_file(const char *real_path, const char *vpath, uint64_t size) {
 	struct fluxfs_dir *current = root;
 	char *path = strdup(vpath);
 	char *token = strtok(path, "/");
@@ -87,7 +89,7 @@ int add_virtual_file(const char *vpath, uint64_t size) {
 		if (next_token) {
 			current = goc_directory(current, token);
 		} else {
-			add_file_to_directory(current, token, size);
+			add_file_to_directory(current, real_path, token, size);
 		}
 		token = next_token;
 	}
@@ -361,10 +363,60 @@ static int do_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, of
 	return 0;
 }
 
+static int do_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+	printf("[read] Called\n");
+	printf("Read of %s requested\n", path);
+
+	struct fluxfs_dir *curdir = root;
+	char *lpath = strdup(path);
+	char *token, *saveptr;
+
+	token = strtok_r(lpath, "/", &saveptr);
+	char *filename = NULL;
+
+	while (token) {
+		char *next_token = strtok_r(NULL, "/", &saveptr);
+		if (next_token) {
+			curdir = get_directory(curdir, token);
+			if (!curdir) {
+				free(lpath);
+				return 0;
+			}
+		}
+		if (!next_token) {
+			filename = token;
+		}
+		token = next_token;
+	}
+
+	struct fluxfs_file *file = NULL;
+	if (curdir->files) {
+		struct fluxfs_file *curfile = curdir->files;
+		while (curfile) {
+			if (strcmp(curfile->name, filename) == 0) {
+				file = curfile;
+				break;
+			}
+			curfile = curfile->next;
+		}
+	}
+
+	if (!file) {
+		free(lpath);
+		return 0;
+	}
+
+	struct vir_file *vf = load_vf(file->real_path);
+	int bytesRead = read_from_vf(vf, buffer, size, offset);
+	free_vf(vf);
+
+	return bytesRead;
+}
+
 static struct fuse_operations operations = {
 	.getattr	= do_getattr,
 	.readdir	= do_readdir,
-	//.read	= do_read,
+	.read	= do_read,
 };
 
 int main(int argc, char *argv[]) {
@@ -396,7 +448,7 @@ int main(int argc, char *argv[]) {
 		if (vpath) {
 			printf("%s\n", vpath);
 			size_t size = fluxfs_get_vf_size(virtual_files[i]);
-			add_virtual_file(vpath, size);
+			add_virtual_file(virtual_files[i], vpath, size);
 		}
 	}
 
