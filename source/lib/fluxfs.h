@@ -37,6 +37,7 @@ struct vir_file {
 
 void free_vf(struct vir_file *vf);
 char *fluxfs_get_vpath(const char *filePath);
+uint64_t fluxfs_get_vf_size(const char *filePath);
 struct vir_file *load_vf(const char *filePath);
 struct vir_file *create_vf(char *path);
 uint8_t vf_add_path(struct vir_file *vf, const char *filePath);

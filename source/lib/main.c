@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <setjmp.h>
+#include <unistd.h>
+#include <libgen.h>
+#include <limits.h>
 
 #include "fluxfs.h"
 
@@ -116,10 +119,37 @@ char *fluxfs_get_vpath(const char *filePath) {
 	return vpath;
 }
 
+uint64_t fluxfs_get_vf_size(const char *filePath) {
+	struct vir_file *vf = load_vf(filePath);
+	if (!vf) {
+		return 0;
+	}
+	uint64_t size = vf->size;
+
+	free_vf(vf);
+
+	return size;
+}
+
 struct vir_file *load_vf(const char *filePath) {
-	FILE *file = fopen(filePath, "rb");
+	char oldCwd[PATH_MAX];
+	if (!getcwd(oldCwd, sizeof(oldCwd))) {
+		perror("getcwd failed");
+		return NULL;
+	}
+
+	char pathCopy[PATH_MAX];
+	strncpy(pathCopy, filePath, PATH_MAX);
+	char *dir = dirname(pathCopy);
+	if (chdir(dir) != 0) {
+		perror("chdir failed");
+		return NULL;
+	}
+
+	FILE *file = fopen(basename((char *)filePath), "rb");
 	if (!file) {
 		perror("Error opening file");
+		chdir(oldCwd);
 		return NULL;
 	}
 
@@ -128,6 +158,7 @@ struct vir_file *load_vf(const char *filePath) {
 
 	if (setjmp(env) == 1) {
 		fclose(file);
+		chdir(oldCwd);
 		return vf;
 	}
 
@@ -198,14 +229,15 @@ struct vir_file *load_vf(const char *filePath) {
 		}
 		vf->tail = entry;
 	}
-	fclose(file);
 
+	fclose(file);
+	chdir(oldCwd);
 	return vf;
 
 	error:
 	free_vf(vf);
 	fclose(file);
-
+	chdir(oldCwd);
 	return NULL;
 }
 

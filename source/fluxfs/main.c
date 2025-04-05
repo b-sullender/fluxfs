@@ -3,12 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <unistd.h>
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <errno.h>
+
+#define FUSE_USE_VERSION 30
+#include <fuse.h>
 
 #include "../lib/fluxfs.h"
 
 struct fluxfs_file {
 	char *name;
+	uint64_t size;
 	struct fluxfs_file *next;
 };
 
@@ -20,8 +28,24 @@ struct fluxfs_dir {
 	struct fluxfs_file *files;
 };
 
-// Find or create a directory
-struct fluxfs_dir *foc_directory(struct fluxfs_dir *parent, const char *dirname) {
+static struct fluxfs_dir *root = NULL;
+
+// Get a directory
+struct fluxfs_dir *get_directory(struct fluxfs_dir *parent, const char *dirname) {
+	// Search for existing directory
+	struct fluxfs_dir *current = parent->subdirs;
+	while (current) {
+		if (strcmp(current->name, dirname) == 0) {
+			return current;
+		}
+		current = current->next;
+	}
+
+	return NULL;
+}
+
+// Get or create a directory
+struct fluxfs_dir *goc_directory(struct fluxfs_dir *parent, const char *dirname) {
 	// Search for existing directory
 	struct fluxfs_dir *current = parent->subdirs;
 	while (current) {
@@ -42,17 +66,18 @@ struct fluxfs_dir *foc_directory(struct fluxfs_dir *parent, const char *dirname)
 	return newdir;
 }
 
-struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *filename) {
+struct fluxfs_file *add_file_to_directory(struct fluxfs_dir *dir, const char *filename, uint64_t size) {
 	struct fluxfs_file *newfile = malloc(sizeof(struct fluxfs_file));
 
 	newfile->name = strdup(filename);
+	newfile->size = size;
 	newfile->next = dir->files;
 	dir->files = newfile;
 
 	return newfile;
 }
 
-int add_virtual_file(struct fluxfs_dir *root, const char *vpath) {
+int add_virtual_file(const char *vpath, uint64_t size) {
 	struct fluxfs_dir *current = root;
 	char *path = strdup(vpath);
 	char *token = strtok(path, "/");
@@ -60,9 +85,9 @@ int add_virtual_file(struct fluxfs_dir *root, const char *vpath) {
 	while (token) {
 		char *next_token = strtok(NULL, "/");
 		if (next_token) {
-			current = foc_directory(current, token);
+			current = goc_directory(current, token);
 		} else {
-			add_file_to_directory(current, token);
+			add_file_to_directory(current, token, size);
 		}
 		token = next_token;
 	}
@@ -117,6 +142,7 @@ char **get_scan_directories(const char *filename, size_t *line_count) {
 	free(line);
 
 	*line_count = count;
+
 	return lines;
 }
 
@@ -183,7 +209,165 @@ char **find_virtual_files(char **directories, size_t dir_count, size_t *file_cou
 	return virtual_files;
 }
 
-int main() {
+void print_fs(struct fluxfs_dir *dir, int depth) {
+	if (dir == NULL) {
+		return;
+	}
+
+	// Indentation for visual hierarchy
+	for (int i = 0; i < depth; ++i) {
+		printf("  ");
+	}
+	printf("[DIR] %s\n", dir->name);
+
+	// Print all files in this directory
+	struct fluxfs_file *file = dir->files;
+	while (file != NULL) {
+		for (int i = 0; i < depth + 1; ++i) {
+			printf("  ");
+		}
+		printf("- %s\n", file->name);
+		file = file->next;
+	}
+
+	// Recursively print all subdirectories
+	struct fluxfs_dir *subdir = dir->subdirs;
+	while (subdir != NULL) {
+		print_fs(subdir, depth + 1);
+		subdir = subdir->next;
+	}
+}
+
+static int do_getattr(const char *path, struct stat *st) {
+	printf("[getattr] Called\n");
+	printf("\tAttributes of %s requested\n", path);
+
+	if (strcmp(path, "/") == 0) {
+		st->st_mode = S_IFDIR | 0755;
+		st->st_nlink = 2;
+		st->st_uid = getuid();
+		st->st_gid = getgid();
+		st->st_atime = time(NULL);
+		st->st_mtime = time(NULL);
+		return 0;
+	}
+
+	struct fluxfs_dir *current = root;
+	char *lpath = strdup(path);
+	char *token, *saveptr;
+
+	token = strtok_r(lpath, "/", &saveptr);
+	char *filename = NULL;
+
+	while (token) {
+		char *next_token = strtok_r(NULL, "/", &saveptr);
+		if (next_token) {
+			current = get_directory(current, token);
+			if (!current) {
+				free(lpath);
+				return -ENOENT;
+			}
+		}
+		if (!next_token) {
+			filename = token;
+		}
+		token = next_token;
+	}
+
+	int found = 0;
+
+	if (current->subdirs) {
+		struct fluxfs_dir *subdir = current->subdirs;
+		while (subdir) {
+			if (strcmp(subdir->name, filename) == 0) {
+				st->st_mode = S_IFDIR | 0755;
+				st->st_nlink = 2;
+				found = 1;
+				break;
+			}
+			subdir = subdir->next;
+		}
+	}
+
+	if (!found && current->files) {
+		struct fluxfs_file *file = current->files;
+		while (file) {
+			if (strcmp(file->name, filename) == 0) {
+				st->st_mode = S_IFREG | 0644;
+				st->st_nlink = 1;
+				st->st_size = file->size;
+				found = 1;
+				break;
+			}
+			file = file->next;
+		}
+	}
+
+	if (!found) {
+		free(lpath);
+		return -ENOENT;
+	}
+
+	st->st_uid = getuid();
+	st->st_gid = getgid();
+	st->st_atime = time(NULL);
+	st->st_mtime = time(NULL);
+
+	free(lpath);
+
+	return 0;
+}
+
+static int do_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+	printf("--> Getting The List of Files of %s\n", path);
+
+	struct fluxfs_dir *current = root;
+	char *lpath = strdup(path);
+	char *token, *saveptr;
+
+	token = strtok_r(lpath, "/", &saveptr);
+	while (token) {
+		current = get_directory(current, token);
+		if (!current) {
+			free(lpath);
+			return -ENOENT;
+		}
+		token = strtok_r(NULL, "/", &saveptr);
+	}
+
+	printf("Found: %s\n", current ? current->name : "NULL");
+
+	filler(buffer, ".", NULL, 0);
+	filler(buffer, "..", NULL, 0);
+
+	if (current->subdirs) {
+		struct fluxfs_dir *subdir = current->subdirs;
+		while (subdir) {
+			filler(buffer, subdir->name, NULL, 0);
+			subdir = subdir->next;
+		}
+	}
+
+	if (current->files) {
+		struct fluxfs_file *file = current->files;
+		while (file) {
+			filler(buffer, file->name, NULL, 0);
+			file = file->next;
+		}
+	}
+
+	free(lpath);
+
+	return 0;
+}
+
+static struct fuse_operations operations = {
+	.getattr	= do_getattr,
+	.readdir	= do_readdir,
+	//.read	= do_read,
+};
+
+int main(int argc, char *argv[]) {
 	size_t dir_count, file_count;
 	char **directories = get_scan_directories("scan.conf", &dir_count);
 
@@ -203,7 +387,7 @@ int main() {
 		printf("No virtual files found.\n");
 	}
 
-	struct fluxfs_dir *root = malloc(sizeof(struct fluxfs_dir));
+	root = malloc(sizeof(struct fluxfs_dir));
 	memset(root, 0, sizeof(struct fluxfs_dir));
 
 	printf("Virtual Paths:\n");
@@ -211,9 +395,15 @@ int main() {
 		char *vpath = fluxfs_get_vpath(virtual_files[i]);
 		if (vpath) {
 			printf("%s\n", vpath);
-			add_virtual_file(root, vpath);
+			size_t size = fluxfs_get_vf_size(virtual_files[i]);
+			add_virtual_file(vpath, size);
 		}
 	}
+
+	printf("FluxFS File System:\n");
+	print_fs(root, 0);
+
+	fuse_main(argc, argv, &operations, NULL);
 
 	for (size_t i = 0; i < dir_count; i++) {
 		free(directories[i]);
