@@ -39,34 +39,34 @@ int createSourceFile() {
 // This is an example of creating a virtual file
 int createVirtualFile(const char *filePath) {
 	// The path arg is the virtual path on the file system
-	struct vir_file *vf = create_vf("files/bytes.bin");
+	struct fluxfs_vf *vf = fluxfs_create_vf("files/bytes.bin");
 	if (!vf) {
 		fprintf(stderr, "Failed to create virtual file\n");
 		return EXIT_FAILURE;
 	}
 
 	// Add the path of the source file
-	uint8_t fileIndex = vf_add_path(vf, "source.bin");
+	uint8_t fileIndex = fluxfs_vf_add_path(vf, "source.bin");
 
 	// Some metadata
 	char data1[] = {
 		0x45, 0x80, 0xF3, 0x12, 0x00,
 		0x5F, 0x1A, 0x31, 0x10, 0xF3
 	};
-	vf_add_data(vf, 10, data1);
+	fluxfs_vf_add_data(vf, 10, data1);
 
 	// Create a reference into the source file
-	vf_add_file_offset(vf, fileIndex, 10, 5);
+	fluxfs_vf_add_file_offset(vf, fileIndex, 10, 5);
 
 	// More meatadata
 	char data2[] = {
 		0x78, 0x40, 0x21, 0x37, 0x98,
 		0xA2, 0xB9, 0x11, 0x23, 0x77
 	};
-	vf_add_data(vf, 10, data2);
+	fluxfs_vf_add_data(vf, 10, data2);
 
 	// Save the file
-	if (save_vf(vf, filePath) != EXIT_SUCCESS) {
+	if (fluxfs_save_vf(vf, filePath) != EXIT_SUCCESS) {
 		fprintf(stderr, "Failed to save virtual file\n");
 		return EXIT_FAILURE;
 	}
@@ -87,7 +87,7 @@ static char expected_bytes[] = {
 };
 
 // This function uses read_from_vf to make sure the expected bytes are read
-int test_vf(struct vir_file *vf) {
+int test_vf(struct fluxfs_vf *vf) {
 	printf("Virtual Read Test:\n");
 
 	// Pass 1 tests reading each byte one-by-one
@@ -95,7 +95,7 @@ int test_vf(struct vir_file *vf) {
 	char buffer[4];
 	printf("Running Pass 1...\n");
 	for (uint64_t i = 0; i < vf->size; i++) {
-		read_from_vf(vf, buffer, 1, i);
+		fluxfs_read_from_vf(vf, buffer, 1, i);
 		if (buffer[0] != expected_bytes[i]) {
 			printf("Pass 1 Failed\n");
 			return EXIT_FAILURE;
@@ -107,7 +107,7 @@ int test_vf(struct vir_file *vf) {
 
 	printf("Running Pass 2...\n");
 	for (uint64_t i = 0; i < (vf->size - 1); i++) {
-		read_from_vf(vf, buffer, 2, i);
+		fluxfs_read_from_vf(vf, buffer, 2, i);
 		if ((buffer[0] != expected_bytes[i]) || (buffer[1] != expected_bytes[i + 1])) {
 			printf("Pass 2 Failed\n");
 			printf("Bytes read: 0x%02X 0x%02X\n", buffer[0], buffer[1]);
@@ -126,16 +126,16 @@ int main() {
 	createVirtualFile("fluxfs.vf");
 	printf("-------------------------------------------------\n");
 
-	struct vir_file *vf = load_vf("fluxfs.vf");
+	struct fluxfs_vf *vf = fluxfs_load_vf("fluxfs.vf");
 	if (!vf) {
 		fprintf(stderr, "Failed to load virtual file\n");
 		return EXIT_FAILURE;
 	}
 
-	print_vf(vf);
+	fluxfs_print_vf(vf);
 	test_vf(vf);
 
-	free_vf(vf);
+	fluxfs_free_vf(vf);
 
 	return EXIT_SUCCESS;
 }

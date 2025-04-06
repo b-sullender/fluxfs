@@ -320,7 +320,13 @@ static int do_getattr(const char *path, struct stat *st) {
 	return 0;
 }
 
-static int do_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+static int do_readdir(
+	const char *path,
+	void *buffer,
+	fuse_fill_dir_t filler,
+	__attribute__((unused)) off_t offset,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
 	printf("--> Getting The List of Files of %s\n", path);
 
 	struct fluxfs_dir *current = root;
@@ -363,7 +369,33 @@ static int do_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, of
 	return 0;
 }
 
-static int do_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+static int do_open(
+	const char *path,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
+	printf("[open] Called\n");
+	printf("Open of %s requested\n", path);
+
+	return 0;
+}
+
+static int do_release(
+	const char *path,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
+	printf("[release] Called\n");
+	printf("Release of %s requested\n", path);
+
+	return 0;
+}
+
+static int do_read(
+	const char *path,
+	char *buffer,
+	size_t size,
+	off_t offset,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
 	printf("[read] Called\n");
 	printf("Read of %s requested\n", path);
 
@@ -406,9 +438,9 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset, st
 		return 0;
 	}
 
-	struct vir_file *vf = load_vf(file->real_path);
-	int bytesRead = read_from_vf(vf, buffer, size, offset);
-	free_vf(vf);
+	struct fluxfs_vf *vf = fluxfs_load_vf(file->real_path);
+	int bytesRead = fluxfs_read_from_vf(vf, buffer, size, offset);
+	fluxfs_free_vf(vf);
 
 	return bytesRead;
 }
@@ -416,7 +448,9 @@ static int do_read(const char *path, char *buffer, size_t size, off_t offset, st
 static struct fuse_operations operations = {
 	.getattr	= do_getattr,
 	.readdir	= do_readdir,
-	.read	= do_read,
+	.open           = do_open,
+	.read	        = do_read,
+	.release        = do_release,
 };
 
 int main(int argc, char *argv[]) {

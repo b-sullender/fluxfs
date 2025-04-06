@@ -26,7 +26,7 @@ struct vf_entry {
 	struct vf_entry *next;
 };
 
-struct vir_file {
+struct fluxfs_vf {
 	FILE *files[256];
 	char *vpath;
 	struct vf_strings *strings;
@@ -35,16 +35,16 @@ struct vir_file {
 	uint64_t size;
 };
 
-void free_vf(struct vir_file *vf);
+void fluxfs_free_vf(struct fluxfs_vf *vf);
 char *fluxfs_get_vpath(const char *filePath);
 uint64_t fluxfs_get_vf_size(const char *filePath);
-struct vir_file *load_vf(const char *filePath);
-struct vir_file *create_vf(char *path);
-uint8_t vf_add_path(struct vir_file *vf, const char *filePath);
-struct vf_entry *vf_add_data(struct vir_file *vf, uint64_t length, const char *data);
-struct vf_entry *vf_add_file_offset(struct vir_file *vf, uint8_t fileIndex, uint64_t length, uint64_t offset);
-int save_vf(struct vir_file *vf, const char *filePath) ;
-int read_from_vf(struct vir_file *vf, char *buf, size_t size, uint64_t offset);
-void print_vf(struct vir_file *vf);
+struct fluxfs_vf *fluxfs_load_vf(const char *filePath);
+struct fluxfs_vf *fluxfs_create_vf(char *path);
+uint8_t fluxfs_vf_add_path(struct fluxfs_vf *vf, const char *filePath);
+struct vf_entry *fluxfs_vf_add_data(struct fluxfs_vf *vf, uint64_t length, const char *data);
+struct vf_entry *fluxfs_vf_add_file_offset(struct fluxfs_vf *vf, uint8_t fileIndex, uint64_t length, uint64_t offset);
+int fluxfs_save_vf(struct fluxfs_vf *vf, const char *filePath) ;
+int fluxfs_read_from_vf(struct fluxfs_vf *vf, char *buf, size_t size, uint64_t offset);
+void fluxfs_print_vf(struct fluxfs_vf *vf);
 
 #endif // !FLUXFS_H

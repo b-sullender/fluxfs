@@ -76,7 +76,7 @@ void read_data(FILE *file, jmp_buf *env, struct vf_entry *entry) {
 	}
 }
 
-void free_vf(struct vir_file *vf) {
+void fluxfs_free_vf(struct fluxfs_vf *vf) {
 	if (vf) {
 		if (vf->vpath) {
 			free(vf->vpath);
@@ -120,18 +120,18 @@ char *fluxfs_get_vpath(const char *filePath) {
 }
 
 uint64_t fluxfs_get_vf_size(const char *filePath) {
-	struct vir_file *vf = load_vf(filePath);
+	struct fluxfs_vf *vf = fluxfs_load_vf(filePath);
 	if (!vf) {
 		return 0;
 	}
 	uint64_t size = vf->size;
 
-	free_vf(vf);
+	fluxfs_free_vf(vf);
 
 	return size;
 }
 
-struct vir_file *load_vf(const char *filePath) {
+struct fluxfs_vf *fluxfs_load_vf(const char *filePath) {
 	char oldCwd[PATH_MAX];
 	if (!getcwd(oldCwd, sizeof(oldCwd))) {
 		perror("getcwd failed");
@@ -153,7 +153,7 @@ struct vir_file *load_vf(const char *filePath) {
 		return NULL;
 	}
 
-	struct vir_file *vf = NULL;
+	struct fluxfs_vf *vf = NULL;
 	jmp_buf env;
 
 	if (setjmp(env) == 1) {
@@ -162,12 +162,12 @@ struct vir_file *load_vf(const char *filePath) {
 		return vf;
 	}
 
-	vf = malloc(sizeof(struct vir_file));
+	vf = malloc(sizeof(struct fluxfs_vf));
 	if (!vf) {
 		perror("malloc failed");
 		goto error;
 	}
-	memset(vf, 0, sizeof(struct vir_file));
+	memset(vf, 0, sizeof(struct fluxfs_vf));
 
 	struct vf_strings *strings = malloc(sizeof(struct vf_strings));
 	if (!strings) {
@@ -235,20 +235,20 @@ struct vir_file *load_vf(const char *filePath) {
 	return vf;
 
 	error:
-	free_vf(vf);
+	fluxfs_free_vf(vf);
 	fclose(file);
 	chdir(oldCwd);
 	return NULL;
 }
 
-struct vir_file *create_vf(char *vpath) {
-	struct vir_file *vf = NULL;
+struct fluxfs_vf *fluxfs_create_vf(char *vpath) {
+	struct fluxfs_vf *vf = NULL;
 
-	vf = malloc(sizeof(struct vir_file));
+	vf = malloc(sizeof(struct fluxfs_vf));
 	if (!vf) {
 		return NULL;
 	}
-	memset(vf, 0, sizeof(struct vir_file));
+	memset(vf, 0, sizeof(struct fluxfs_vf));
 	vf->vpath = strdup(vpath);
 	if (!vf->vpath) {
 		free(vf);
@@ -267,14 +267,14 @@ struct vir_file *create_vf(char *vpath) {
 	return vf;
 }
 
-uint8_t vf_add_path(struct vir_file *vf, const char *filePath) {
+uint8_t fluxfs_vf_add_path(struct fluxfs_vf *vf, const char *filePath) {
 	uint8_t i = vf->strings->cnt;
 	vf->strings->paths[i] = strdup(filePath);
 	vf->strings->cnt++;
 	return i;
 }
 
-struct vf_entry *vf_add_data(struct vir_file *vf, uint64_t length, const char *data) {
+struct vf_entry *fluxfs_vf_add_data(struct fluxfs_vf *vf, uint64_t length, const char *data) {
 	struct vf_entry *entry = malloc(sizeof(struct vf_entry));
 	if (!entry) {
 		return NULL;
@@ -300,7 +300,7 @@ struct vf_entry *vf_add_data(struct vir_file *vf, uint64_t length, const char *d
 	return entry;
 }
 
-struct vf_entry *vf_add_file_offset(struct vir_file *vf, uint8_t fileIndex, uint64_t length, uint64_t offset) {
+struct vf_entry *fluxfs_vf_add_file_offset(struct fluxfs_vf *vf, uint8_t fileIndex, uint64_t length, uint64_t offset) {
 	struct vf_entry *entry = malloc(sizeof(struct vf_entry));
 	if (!entry) {
 		return NULL;
@@ -322,7 +322,7 @@ struct vf_entry *vf_add_file_offset(struct vir_file *vf, uint8_t fileIndex, uint
 	return entry;
 }
 
-int save_vf(struct vir_file *vf, const char *filePath) {
+int fluxfs_save_vf(struct fluxfs_vf *vf, const char *filePath) {
 	FILE *file = fopen(filePath, "wb");
 	if (!file) {
 		perror("Error opening file");
@@ -421,7 +421,7 @@ int save_vf(struct vir_file *vf, const char *filePath) {
 	return 0;
 }
 
-/*int read_from_vf(struct vir_file *vf, char *buf, size_t size, off_t offset) {
+/*int read_from_vf(struct fluxfs_vf *vf, char *buf, size_t size, off_t offset) {
 	uint64_t vf_offset = 0;
 	int bytesRead = 0;
 	struct vf_entry *entry = vf->head;
@@ -454,7 +454,7 @@ int save_vf(struct vir_file *vf, const char *filePath) {
 	return bytesRead;
 }*/
 
-int read_from_vf(struct vir_file *vf, char *buf, size_t size, uint64_t offset) {
+int fluxfs_read_from_vf(struct fluxfs_vf *vf, char *buf, size_t size, uint64_t offset) {
 	uint64_t vf_offset = 0;
 	int bytesRead = 0;
 	struct vf_entry *entry = vf->head;
@@ -491,7 +491,7 @@ int read_from_vf(struct vir_file *vf, char *buf, size_t size, uint64_t offset) {
 	return bytesRead;
 }
 
-void print_vf(struct vir_file *vf) {
+void fluxfs_print_vf(struct fluxfs_vf *vf) {
 	printf("Virtual Path: %s\n", vf->vpath);
 	printf("Virtual Size: %" PRIu64 "\n", vf->size);
 	printf("Path Strings:\n");
