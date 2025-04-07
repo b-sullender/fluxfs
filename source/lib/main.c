@@ -44,12 +44,21 @@ uint64_t read_uint64(FILE *file, jmp_buf *env) {
 	return value;
 }
 
-void read_path(FILE *file, jmp_buf *env, char *path) {
-	int i = 0;
-	path[i] = read_uint8(file, env);
-	while (path[i] != 0) {
+void read_string(FILE *file, jmp_buf *env, char *buffer, size_t bufLength) {
+	if (bufLength == 0) {
+		return;
+	}
+
+	size_t i = 0;
+	buffer[i] = read_uint8(file, env);
+	while (buffer[i] != 0) {
 		i++;
-		path[i] = read_uint8(file, env);
+		if (i >= bufLength) {
+			// Force null-termination to avoid overflow
+			buffer[i - 1] = 0;
+			return;
+		}
+		buffer[i] = read_uint8(file, env);
 	}
 }
 
@@ -114,7 +123,7 @@ char *fluxfs_get_vpath(const char *filePath) {
 		fclose(file);
 		return NULL;
 	}
-	read_path(file, &env, vpath);
+	read_string(file, &env, vpath, pathLen);
 
 	return vpath;
 }
@@ -176,13 +185,20 @@ struct fluxfs_vf *fluxfs_load_vf(const char *filePath) {
 	}
 	vf->strings = strings;
 
+	char signature[10];
+	read_string(file, &env, signature, 10);
+	if (strcmp(signature, "FluxFS VF") != 0) {
+		fprintf(stderr, "%s is not a FluxFS virtual file (invalid signature)", filePath);
+		goto error;
+	}
+
 	uint16_t pathLen = read_uint16(file, &env);
 	vf->vpath = malloc(pathLen);
 	if (!vf->vpath) {
 		perror("malloc failed");
 		goto error;
 	}
-	read_path(file, &env, vf->vpath);
+	read_string(file, &env, vf->vpath, pathLen);
 
 	strings->cnt = read_uint8(file, &env);
 	for (int i = 0; i < strings->cnt; i++) {
@@ -192,7 +208,7 @@ struct fluxfs_vf *fluxfs_load_vf(const char *filePath) {
 			perror("malloc failed");
 			goto error;
 		}
-		read_path(file, &env, strings->paths[i]);
+		read_string(file, &env, strings->paths[i], pathLen);
 		vf->files[i] = fopen(strings->paths[i], "rb");
 		if (!vf->files[i]) {
 			fprintf(stderr, "Error opening file: %s\n", vf->strings->paths[i]);
@@ -214,11 +230,11 @@ struct fluxfs_vf *fluxfs_load_vf(const char *filePath) {
 		if (type == 0) {
 			read_data(file, &env, entry);
 		} else {
+			entry->data.offset = read_offset(file, &env, (entry->type >> 3) & 3);
 			entry->pathIndex = entry->type >> 5;
 			if (entry->pathIndex == 7) {
 				entry->pathIndex = read_uint8(file, &env);
 			}
-			entry->data.offset = read_offset(file, &env, (entry->type >> 3) & 3);
 		}
 		entry->type = type;
 		entry->next = NULL;
@@ -329,15 +345,19 @@ int fluxfs_save_vf(struct fluxfs_vf *vf, const char *filePath) {
 		return 1;
 	}
 
-	uint16_t pathLen = strlen(vf->vpath) + 1;
-	fwrite(&pathLen, 2, 1, file);
-	fwrite(vf->vpath, pathLen, 1, file);
+	char signature[] = "FluxFS VF";
+	uint16_t stringLen = strlen(signature) + 1;
+	fwrite(signature, stringLen, 1, file);
+
+	stringLen = strlen(vf->vpath) + 1;
+	fwrite(&stringLen, 2, 1, file);
+	fwrite(vf->vpath, stringLen, 1, file);
 
 	fwrite(&vf->strings->cnt, 1, 1, file);
 	for (uint8_t i = 0; i < vf->strings->cnt; i++) {
-		pathLen = strlen(vf->strings->paths[i]) + 1;
-		fwrite(&pathLen, 2, 1, file);
-		fwrite(vf->strings->paths[i], pathLen, 1, file);
+		stringLen = strlen(vf->strings->paths[i]) + 1;
+		fwrite(&stringLen, 2, 1, file);
+		fwrite(vf->strings->paths[i], stringLen, 1, file);
 	}
 
 	struct vf_entry *entry = vf->head;
@@ -395,9 +415,6 @@ int fluxfs_save_vf(struct fluxfs_vf *vf, const char *filePath) {
 				fwrite(&entry->data.bytes[i], 1, 1, file);
 			}
 		} else {
-			if (pathIndex == 7) {
-				//fwrite(&entry->pathIndex, 1, 1, file);
-			}
 			if (offsetSize == 0) {
 				uint8_t offset = entry->data.offset;
 				fwrite(&offset, 1, 1, file);
@@ -410,6 +427,9 @@ int fluxfs_save_vf(struct fluxfs_vf *vf, const char *filePath) {
 			} else {
 				uint64_t offset = entry->data.offset;
 				fwrite(&offset, 8, 1, file);
+			}
+			if (pathIndex == 7) {
+				fwrite(&entry->pathIndex, 1, 1, file);
 			}
 		}
 
