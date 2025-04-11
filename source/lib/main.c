@@ -90,14 +90,27 @@ void fluxfs_free_vf(struct fluxfs_vf *vf) {
 		if (vf->vpath) {
 			free(vf->vpath);
 		}
-		for (uint8_t i = 0; i < vf->strings->cnt; i++) {
-			if (vf->files[i]) {
-				fclose(vf->files[i]);
+		if (vf->strings) {
+			for (uint8_t i = 0; i < vf->strings->cnt; i++) {
+				if (vf->files[i]) {
+					fclose(vf->files[i]);
+				}
+				if (vf->strings->paths[i]) {
+					free(vf->strings->paths[i]);
+				}
 			}
-			if (vf->strings->paths[i]) {
-				free(vf->strings->paths[i]);
-			}
+			free(vf->strings);
 		}
+		struct vf_entry *current = vf->head;
+		while (current) {
+			if (current->type == 0) {
+				free(current->data.bytes);
+			}
+			struct vf_entry *next = current->next;
+			free(current);
+			current = next;
+		}
+		free(vf);
 	}
 }
 
@@ -114,6 +127,14 @@ char *fluxfs_get_vpath(const char *filePath) {
 	if (setjmp(env) == 1) {
 		fclose(file);
 		return vpath;
+	}
+
+	char signature[10];
+	read_string(file, &env, signature, 10);
+	if (strcmp(signature, "FluxFS VF") != 0) {
+		fprintf(stderr, "%s is not a FluxFS virtual file (invalid signature)", filePath);
+		fclose(file);
+		return NULL;
 	}
 
 	uint16_t pathLen = read_uint16(file, &env);
