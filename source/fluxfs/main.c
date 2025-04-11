@@ -18,6 +18,7 @@ struct fluxfs_file {
 	char *real_path;
 	char *name;
 	uint64_t size;
+	struct fluxfs_vf *vf;
 	struct fluxfs_file *next;
 };
 
@@ -97,10 +98,10 @@ int add_virtual_file(const char *real_path, const char *vpath, uint64_t size) {
 	return EXIT_SUCCESS;
 }
 
-char **get_scan_directories(const char *filename, size_t *line_count) {
-	FILE *file = fopen(filename, "r");
+char **get_scan_directories(size_t *line_count) {
+	FILE *file = fopen("scan.conf", "r");
 	if (file == NULL) {
-		perror("Error opening file");
+		perror("Error opening file scan.conf");
 		*line_count = 0;
 		return NULL;
 	}
@@ -369,36 +370,7 @@ static int do_readdir(
 	return 0;
 }
 
-static int do_open(
-	const char *path,
-	__attribute__((unused)) struct fuse_file_info *fi)
-{
-	printf("[open] Called\n");
-	printf("Open of %s requested\n", path);
-
-	return 0;
-}
-
-static int do_release(
-	const char *path,
-	__attribute__((unused)) struct fuse_file_info *fi)
-{
-	printf("[release] Called\n");
-	printf("Release of %s requested\n", path);
-
-	return 0;
-}
-
-static int do_read(
-	const char *path,
-	char *buffer,
-	size_t size,
-	off_t offset,
-	__attribute__((unused)) struct fuse_file_info *fi)
-{
-	printf("[read] Called\n");
-	printf("Read of %s requested\n", path);
-
+struct fluxfs_file *get_file(const char *path) {
 	struct fluxfs_dir *curdir = root;
 	char *lpath = strdup(path);
 	char *token, *saveptr;
@@ -412,7 +384,7 @@ static int do_read(
 			curdir = get_directory(curdir, token);
 			if (!curdir) {
 				free(lpath);
-				return 0;
+				return NULL;
 			}
 		}
 		if (!next_token) {
@@ -433,16 +405,70 @@ static int do_read(
 		}
 	}
 
+	free(lpath);
+
+	return file;
+}
+
+static int do_open(
+	const char *path,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
+	printf("[open] Called\n");
+	printf("Open of %s requested\n", path);
+
+	struct fluxfs_file *file = get_file(path);
 	if (!file) {
-		free(lpath);
+		return -ENOENT;
+	}
+
+	if (!file->vf) {
+		file->vf = fluxfs_load_vf(file->real_path);
+	}
+
+	return 0;
+}
+
+static int do_release(
+	const char *path,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
+	printf("[release] Called\n");
+	printf("Release of %s requested\n", path);
+
+	struct fluxfs_file *file = get_file(path);
+	if (!file) {
+		return -ENOENT;
+	}
+
+	if (file->vf) {
+		fluxfs_free_vf(file->vf);
+		file->vf = NULL;
+	}
+
+	return 0;
+}
+
+static int do_read(
+	const char *path,
+	char *buffer,
+	size_t size,
+	off_t offset,
+	__attribute__((unused)) struct fuse_file_info *fi)
+{
+	printf("[read] Called\n");
+	printf("Read of %s requested\n", path);
+
+	struct fluxfs_file *file = get_file(path);
+	if (!file) {
+		return -ENOENT;
+	}
+
+	if (!file->vf) {
 		return 0;
 	}
 
-	struct fluxfs_vf *vf = fluxfs_load_vf(file->real_path);
-	int bytesRead = fluxfs_read_from_vf(vf, buffer, size, offset);
-	fluxfs_free_vf(vf);
-
-	return bytesRead;
+	return fluxfs_read_from_vf(file->vf, buffer, size, offset);
 }
 
 static struct fuse_operations operations = {
@@ -455,10 +481,12 @@ static struct fuse_operations operations = {
 
 int main(int argc, char *argv[]) {
 	size_t dir_count, file_count;
-	char **directories = get_scan_directories("scan.conf", &dir_count);
+	char **directories = get_scan_directories(&dir_count);
 
 	if (!directories) {
 		printf("No scan directories found.\n");
+		printf("  Each line of scan.conf is a directory to scan for virtual files\n");
+		printf("  See https://github.com/b-sullender/fluxfs for more info\n");
 		return EXIT_FAILURE;
 	}
 
